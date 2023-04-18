@@ -5,10 +5,11 @@ __email__ = "renaud.loiseleux@gmail.com"
 import requests as requests
 from retry import retry
 
-from kernel.storage import Storage
+from conf import Conf
+from cozytouch.snapshot import Snapshot
 
 
-class Cozytouch:
+class Api:
     URL = "https://ha110-1.overkiz.com/enduser-mobile-web/externalAPI/json/"
     URL_ATLANTIC = "https://apis.groupe-atlantic.com"
     URL_LOGIN = "https://ha110-1.overkiz.com/enduser-mobile-web/enduserAPI"
@@ -16,17 +17,19 @@ class Cozytouch:
     class NotAllowedException(Exception):
         pass
 
-    def __init__(self, conf):
-        self.conf = conf
+    def __init__(self):
+        self.session = {}
 
     def _update_session(self):
         print("update session")
+        conf = Conf().get_conf()
+
         req = requests.post(
             self.URL_ATLANTIC + '/token',
             data={
                 'grant_type': 'password',
-                'username': 'GA-PRIVATEPERSON/' + self.conf["cozytouch"]["login"],
-                'password': self.conf["cozytouch"]["password"]
+                'username': 'GA-PRIVATEPERSON/' + conf["cozytouch"]["login"],
+                'password': conf["cozytouch"]["password"]
             },
             headers={
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -46,26 +49,26 @@ class Cozytouch:
                 'jwt': reqjwt.content.decode().replace('"', '')
             }
         )
-        Storage().set("session_obj", {"JSESSIONID": jsession.cookies['JSESSIONID']})
+        self.session = {"JSESSIONID": jsession.cookies['JSESSIONID']}
 
     @retry(NotAllowedException, tries=2)
     def _get(self, endpoint: str):
         print(f"GET {endpoint}")
         req = requests.get(
-            Cozytouch.URL + endpoint,
+            Api.URL + endpoint,
             headers={
                 'cache-control': "no-cache",
                 'Host': "ha110-1.overkiz.com",
                 'Connection': "Keep-Alive",
             },
-            cookies=Storage().get('session_obj', {})
+            cookies=self.session,
         )
         match req.status_code:
             case 401:
                 self._update_session()
-                raise Cozytouch.NotAllowedException
+                raise Api.NotAllowedException
             case 200:
                 return req.json()
 
-    def get_state(self):
-        return self._get("getSetup")
+    def get_snapshot(self) -> Snapshot:
+        return Snapshot(self._get("getSetup"))
